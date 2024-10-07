@@ -1,0 +1,515 @@
+---
+title: "EDA Final Project"
+author: "Manali Shelar"
+date: "2023-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(broom)
+library(arm)
+library(ggridges)
+library(mgcv)
+library(dplyr)
+library(modelr)
+cb_palette = c("#999999", "#E69F00", "#56B4E9", "#009E73",
+               "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+
+Read the project data file:
+
+```{r}
+fuel_data <- read.csv("vehicles.csv")
+head(fuel_data)
+```
+
+
+```{r}
+#View(fuel_data)
+```
+
+```{r}
+dim(fuel_data)
+```
+
+
+
+```{r}
+# summary(fuel_data)
+```
+
+Data Preparation:
+
+```{r}
+fuel_data <- fuel_data[!is.na(fuel_data$displ), ]
+```
+
+
+
+```{r}
+fuel_data$decade <- cut(fuel_data$year, breaks = seq(1980, 2030, by = 10), labels = seq(1980, 2020, by = 10))
+```
+
+Data Exploration with Basic plots:
+
+
+Average Fuel Economy over the years
+
+```{r , fig.height=4, fig.width=8}
+plot1 <- fuel_data %>% 
+  group_by(year) %>% 
+  summarise(avgMPG = mean(comb08), .groups = "drop") %>% 
+  ggplot(aes(x=year, y = avgMPG)) +
+  geom_line(alpha = 0.5, show.legend = FALSE) +
+  geom_point(show.legend = FALSE) +
+  scale_x_continuous(breaks =  seq( min(fuel_data$year), max(fuel_data$year), by = 4) ) +
+  scale_color_viridis_c() + 
+  labs(title = "Average fuel economy over the years", y = "Average MPG", x = "Year")
+plot1
+```
+
+```{r}
+ggsave("plot1.png", plot = plot1, width = 6, height = 4)
+```
+
+
+
+```{r}
+# Plotting histogram
+plot2 <- ggplot(fuel_data, aes(x = displ)) +
+  geom_histogram(binwidth = 0.2, position = "identity", alpha = 0.7) +
+  facet_wrap(~ decade, labeller = label_both) +
+  labs(title = "Distribution of Engine Displacement by Decade",
+       x = "Engine Displacement (liters)",
+       y = "Frequency") +
+  scale_fill_viridis_d()
+plot2
+```
+
+
+```{r}
+ggsave("plot2.png", plot = plot2, width = 6, height = 4)
+```
+
+
+
+Average Fuel Economy over time by fuel type
+
+```{r , fig.height=4, fig.width=11}
+plot3 <- fuel_data %>% 
+  filter(fuelType1 != "Electricity") %>%
+  group_by(year, fuelType1) %>% 
+  summarise(avgMPG = mean(comb08), .groups = "drop") %>% 
+  ggplot(aes(x=year, y = avgMPG)) +
+  geom_line(aes(color = avgMPG), alpha = 0.5, show.legend = FALSE) +
+  geom_point(aes(color = avgMPG), show.legend = FALSE) +
+  scale_x_continuous(breaks =  seq( min(fuel_data$year), max(fuel_data$year), by = 4) ) +
+  scale_color_viridis_c() + 
+  facet_wrap(~ fuelType1, labeller = label_both) +
+  labs(title = "Average fuel economy over the years", y = "Average MPG", x = "Year") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 7))
+plot3
+```
+
+```{r}
+ggsave("plot3.png", plot = plot3, width = 6, height = 4)
+```
+
+
+
+Fuel economy by vehicle class:
+
+
+```{r}
+fuel_data <- fuel_data %>%
+  mutate(VClass_category = case_when(
+    grepl("Cars|Two Seaters", VClass) ~ "Cars",
+    grepl("Van", VClass) ~ "Vans",
+    grepl("Pickup Trucks", VClass) ~ "Pickup Trucks",
+    grepl("Sport Utility Vehicle", VClass) ~ "SUV",
+    grepl("Station Wagons", VClass) ~ "Station Wagons",
+    TRUE ~ "Other"
+  ))
+```
+
+
+
+```{r, fig.height=5,  fig.width=6}
+plot4 <- fuel_data %>% 
+  group_by(VClass) %>% 
+  mutate(avgMPG = mean(comb08)) %>% ungroup() %>%
+  ggplot(aes(x = avgMPG, y = as.factor(VClass_category))) +
+  geom_density_ridges(aes(fill = VClass_category), rel_min_height = 0.001, show.legend = FALSE, alpha = 0.7) +
+  scale_fill_manual(values = cb_palette) +
+  labs(title = "Fuel economy density by Vehicle class", y = "Vehicle Class", x = "Avg MPG")
+plot4
+```
+
+
+```{r}
+ggsave("plot4.png", plot = plot4, width = 6, height = 4)
+```
+
+
+Fuel Economy and Engine Displacement for different vehicle class (Year- 2023):
+
+```{r}
+plot5 <- fuel_data %>% 
+  filter(year == 2023) %>%
+  ggplot(aes(y=comb08, x = displ)) + 
+  geom_point(aes(color = VClass_category, group = VClass_category), position = "jitter",  na.rm = TRUE, size = 2, alpha = 0.6) +
+  scale_fill_manual(values = cb_palette) +
+  labs(title = "Fuel Economy vs Displacement", y = "Avg MPG", x = "Displacement (litres)") +
+  guides(color = guide_legend(title="Vehicle class"))
+plot5
+```
+
+
+```{r}
+ggsave("plot5.png", plot = plot5, width = 6, height = 4)
+```
+
+
+
+Relationship between Fuel economy and Vehicle Class over time:
+
+
+```{r}
+plot6 <- fuel_data %>% 
+  group_by(year, VClass_category) %>% 
+  mutate(avgMPG = mean(comb08)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = year, y = avgMPG)) +
+  geom_point(aes(color = VClass_category), alpha = 0.1) +
+  geom_smooth(aes(color = VClass_category))  +
+  labs(title = "Fuel economy by Vehicle class over time", y = "Avg MPG", x = "Year") +
+  guides(color = guide_legend(title="Vehicle class")) +
+  scale_fill_manual(values = cb_palette)
+plot6
+```
+
+```{r}
+ggsave("plot6.png", plot = plot6, width = 6, height = 4)
+```
+
+
+Relationship between the Fuel Economy and Displacement Over Time:
+
+```{r warning=FALSE}
+ggplot(fuel_data, aes(x = displ, y = comb08, color = year)) +
+  geom_point(alpha = 0.2, size = 1) +
+  # geom_jitter(height = 0.1, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +  
+  labs(title = "Fuel Economy and Displacement Over Time",
+       x = "Displacement",
+       y = "Combined MPG") +
+  theme_minimal()
+```
+
+
+
+```{r}
+plot7 <- ggplot(fuel_data, aes(x = displ, y = comb08)) +
+  geom_point(alpha = 0.2, size = 0.6) +
+  geom_smooth(method = "gam", se = FALSE) +  
+  facet_wrap(~ decade, labeller = label_both) +
+  labs(title = "Fuel Economy and Displacement Over Time",
+       x = "Displacement",
+       y = "Combined MPG") +
+  theme_minimal()
+plot7
+```
+
+
+```{r}
+ggsave("plot7.png", plot = plot7, width = 6, height = 4)
+```
+
+One predictor models:
+
+GAM Model:
+
+
+```{r}
+fuel_data.model1 <- gam(comb08 ~ s(displ), data = fuel_data)
+fuel_data.model1
+```
+
+```{r}
+fuel_data.model1.df <- augment(fuel_data.model1)
+```
+
+```{r}
+ggplot(fuel_data.model1.df, aes(x = displ, y = .fitted)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.5, size = 0.4) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Fitted Values")
+```
+
+
+
+```{r}
+ggplot(fuel_data.model1.df, aes(x = displ, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Residuals")
+```
+
+
+
+
+Two predictor models:
+
+GAM Model:
+
+```{r}
+fuel_data.model3 <- gam(comb08 ~ s(displ) + s(year), data = fuel_data)
+fuel_data.model3
+```
+
+```{r}
+plot(fuel_data.model3)
+```
+
+
+
+```{r}
+fuel_data.model3.df <- augment(fuel_data.model3)
+```
+
+```{r}
+ggplot(fuel_data.model3.df, aes(x = displ, y = .fitted)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.5, size = 0.4) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Fitted Values")
+```
+
+
+```{r}
+ggplot(fuel_data.model3.df, aes(x = displ, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Residuals")
+```
+
+Three predictor model:
+
+GAM Model:
+
+```{r}
+fuel_data.model5 <- gam(comb08 ~ s(displ) + s(year) + VClass_category, data = fuel_data)
+fuel_data.model5
+
+plot(fuel_data.model5)
+```
+
+
+
+
+
+
+```{r}
+fuel_data.model5.df <- augment(fuel_data.model5)
+```
+
+
+```{r}
+plot8 <- ggplot(fuel_data.model5.df, aes(x = displ, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Displacement", y = "Residuals")
+plot8 
+
+ggplot(fuel_data.model5.df, aes(x = year, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Year", y = "Residuals")
+ggplot(fuel_data.model5.df, aes(x = VClass_category, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Vehicle Category", y = "Residuals")
+
+plot9 <- ggplot(fuel_data.model5.df %>% 
+         mutate(decade = as.factor(floor(year / 10) * 10)), 
+       aes(x = displ, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() +
+  labs(title = "Residual Analysis by Decade", x = "Displacement", y = "Residuals") +
+  facet_wrap(~ decade, labeller = label_both)
+plot9
+
+ggplot(fuel_data.model5.df, aes(x = .fitted, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Fitted Values", y = "Residuals")
+```
+
+```{r}
+ggsave("plot8.png", plot = plot8, width = 6, height = 4)
+ggsave("plot9.png", plot = plot9, width = 6, height = 4)
+```
+
+```{r}
+ggplot(fuel_data.model5.df, aes(x = displ, y = .fitted)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.5, size = 0.4) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Fitted Values")
+
+ggplot(fuel_data.model5.df, aes(x = year, y = .fitted)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.5, size = 0.4) +
+  geom_smooth() +
+  labs(x = "Year", y = "Fitted Values")
+```
+
+
+```{r}
+fuel.grid2 = expand.grid(displ = seq(0.6, 7.0, 0.1),
+                         year = seq(1984, 2024, 1),
+                         VClass_category = c('Cars', 'Vans', 'Pickup Trucks', 'SUV', 'Station Wagons'))
+mpg.predict2 <- predict(fuel_data.model5, newdata = fuel.grid2)
+mpg.df2 <- data.frame(fuel.grid2, comb08 = as.vector(mpg.predict2))
+```
+
+
+
+
+```{r , fig.height=4,  fig.width=8}
+plot10 <- ggplot(mpg.df2, aes(x = displ, y = comb08, color = year, group = year)) +
+  facet_grid(~VClass_category) + geom_line() +
+  scale_color_viridis_c() +
+  labs(x = "Displacement", y = "Combined MPG", color = "Year")
+plot10
+```
+
+
+
+
+```{r}
+ggsave("plot10.png", plot = plot10, width = 6, height = 4)
+```
+
+
+```{r , fig.height=4,  fig.width=8}
+ggplot(mpg.df2 %>% 
+         mutate(decade = as.factor(floor(year / 10) * 10)), 
+       aes(x = displ, y = comb08, color = VClass_category, group = VClass_category)) +
+  labs(x = "Displacement", y = "Residuals") +
+  facet_grid(~ decade, labeller = label_both) + geom_line()+
+  scale_color_manual(values = cb_palette)
+```
+
+
+Three predictor model with interaction:
+
+
+```{r}
+fuel_data.model6 <- gam(comb08 ~ s(displ, year) + VClass_category, data = fuel_data)
+fuel_data.model6
+
+plot(fuel_data.model6)
+```
+
+
+
+```{r}
+fuel_data.model6.df <- augment(fuel_data.model6)
+```
+
+
+```{r}
+ggplot(fuel_data.model6.df, aes(x = displ, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Displacement", y = "Residuals")
+ggplot(fuel_data.model6.df, aes(x = year, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Year", y = "Residuals")
+ggplot(fuel_data.model6.df, aes(x = VClass_category, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Vehicle Category", y = "Residuals")
+
+ggplot(fuel_data.model6.df %>% 
+         mutate(decade = as.factor(floor(year / 10) * 10)), 
+       aes(x = displ, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Residuals") +
+  facet_wrap(~ decade, labeller = label_both)
+
+ggplot(fuel_data.model6.df, aes(x = .fitted, y = .resid)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.2, size = 0.6) +
+  geom_smooth() + labs(x = "Fitted Values", y = "Residuals")
+```
+
+```{r}
+ggplot(fuel_data.model6.df, aes(x = displ, y = .fitted)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.5, size = 0.4) +
+  geom_smooth() +
+  labs(x = "Displacement", y = "Fitted Values")
+
+ggplot(fuel_data.model6.df, aes(x = year, y = .fitted)) +
+  geom_jitter(height = 0.25, width = 0.1, alpha = 0.5, size = 0.4) +
+  geom_smooth() +
+  labs(x = "Year", y = "Fitted Values")
+```
+
+
+```{r}
+fuel.grid2 = expand.grid(displ = seq(0.6, 8.4, 0.1),
+                         year = seq(1984, 2024, 1),
+                         VClass_category = c('Cars', 'Vans', 'Pickup Trucks', 'SUV', 'Station Wagons'))
+mpg.predict2 <- predict(fuel_data.model6, newdata = fuel.grid2)
+mpg.df2 <- data.frame(fuel.grid2, comb08 = as.vector(mpg.predict2))
+```
+
+
+```{r , fig.height=4,  fig.width=8}
+ggplot(mpg.df2, aes(x = displ, y = comb08, color = year, group = year)) +
+  facet_grid(~VClass_category) + geom_line() +
+  scale_color_viridis_c()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
